@@ -1300,6 +1300,9 @@ ERL_NIF_TERM nif_impl(ErlNifEnv *env, const ERL_NIF_TERM argv[],
   } catch (const std::runtime_error &error) {
     return raise_error_with_message(env, __private__::atoms::ElixirRuntimeError,
                                     error.what());
+  } catch (const std::exception &error) {
+    return raise_error_with_message(env, __private__::atoms::ElixirRuntimeError,
+                                    error.what());
   } catch (...) {
     return raise_error_with_message(env, __private__::atoms::ElixirRuntimeError,
                                     "unknown exception thrown within NIF");

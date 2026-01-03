@@ -95,8 +95,8 @@ float random_between_0_and_1() {
 namespace pathfind
 {
 Map::Map(const std::filesystem::path& dataPath, const std::string& mapName)
-    : m_dataPath(dataPath), m_bvhLoader(dataPath), m_mapName(mapName),
-      m_globalWmoOriginX(0.f), m_globalWmoOriginY(0.f)
+    : m_bvhLoader(dataPath), m_hasADTs(false), m_globalWmoOriginX(0.f),
+      m_globalWmoOriginY(0.f), m_dataPath(dataPath), m_mapName(mapName)
 {
     utility::BinaryStream in(m_dataPath / (mapName + ".map"));
 
@@ -619,8 +619,10 @@ bool Map::GetADTHeight(const Tile* tile, float x, float y, float& height,
     // quad coordinates
     auto const quadX = static_cast<int>((northwestY - y) / quadWidth);
     auto const quadY = static_cast<int>((northwestX - x) / quadWidth);
+    constexpr int quadCount = 8 / MeshSettings::TilesPerChunk;
 
-    assert(quadX < 8 && quadY < 8);
+    if (quadX < 0 || quadY < 0 || quadX >= quadCount || quadY >= quadCount)
+        return false;
 
     // if there is an ADT hole here, do not consider ADT height
     if (tile->m_quadHoles[quadX][quadY])
@@ -887,7 +889,7 @@ bool Map::FindHeights(float x, float y, std::vector<float>& output) const
 
             // if this nudge put us below the tile boundary, don't try another ray cast
             // as this will cause the ray to go upward instead of downward.
-            if (current < tile->m_bounds.getMaximum().Z)
+            if (current < tile->m_bounds.getMinimum().Z)
                 break;
         }
         else

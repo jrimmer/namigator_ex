@@ -13,6 +13,58 @@ Port the namigator C++ pathfinding library to Elixir as a standalone hex package
 - MapBuilder/parser (mesh generation is separate tooling)
 - OTP patterns (GenServer, supervision) - left to consuming apps
 
+## Critical Design Considerations
+
+### Thread Safety
+
+**The underlying `pathfind::Map` C++ class is NOT thread-safe.** From `Map.hpp`:
+
+> "instances of this type are assumed to be thread-local, therefore the type is not thread safe"
+
+**Implications for Elixir consumers:**
+- Multiple Elixir processes calling NIF functions on the same map resource concurrently will cause undefined behavior
+- Consuming applications MUST serialize access to a map resource (e.g., via GenServer)
+- Alternatively, each process can maintain its own map resource (higher memory usage)
+
+**Recommended pattern for consumers:**
+```elixir
+defmodule MyApp.MapServer do
+  use GenServer
+
+  def find_path(server, start, stop) do
+    GenServer.call(server, {:find_path, start, stop})
+  end
+
+  def handle_call({:find_path, start, stop}, _from, %{map: map} = state) do
+    result = Namigator.Map.find_path(map, start, stop)
+    {:reply, result, state}
+  end
+end
+```
+
+### Coordinate System
+
+This library uses the World of Warcraft coordinate system:
+- **X-axis**: East-West (positive = East)
+- **Y-axis**: North-South (positive = North)
+- **Z-axis**: Vertical (positive = Up)
+
+All coordinate tuples are `{x, y, z}` in this order.
+
+### Memory Characteristics
+
+- Each map resource loads navigation mesh data into memory
+- ADT loading is incremental - only loaded tiles consume memory
+- `load_all_adts/1` can consume significant memory for large continents (Kalimdor, Eastern Kingdoms)
+- Models (WMO, doodads) are reference-counted and shared across tiles
+- Resources are automatically freed when the Elixir term is garbage collected
+
+### Resource Exhaustion Considerations
+
+- No built-in limits on number of maps or ADTs loaded
+- Consuming applications should implement their own limits if needed
+- Consider using `load_adt/3` for on-demand loading rather than `load_all_adts/1`
+
 ## Architecture
 
 ### Package Structure
@@ -33,7 +85,7 @@ namigator/
 ├── lib/
 │   ├── namigator.ex                 # Delegates to Namigator.Map
 │   └── namigator/
-│       ├── nif.ex                   # Low-level bindings
+│       ├── nif.ex                   # Low-level bindings with typespecs
 │       └── map.ex                   # Thin struct wrapper
 ├── priv/
 │   └── .gitkeep                     # NIF .so goes here
@@ -46,14 +98,17 @@ namigator/
 **Layer 1: NIF (Namigator.NIF)**
 - Direct Fine bindings to namigator C API
 - `map_new/2` returns Fine `ResourcePtr<pathfind::Map>`
-- Individual float parameters for coordinates (matches thistle_tea convention)
-- Returns `{:ok, result}` | `{:error, reason}`
+- Validates `map_name` to prevent path traversal attacks
+- Uses dirty CPU schedulers for potentially slow operations
+- Returns `{:ok, result}` | `{:error, reason}` consistently
+- Full typespecs for all functions
 
 **Layer 2: Thin Wrapper (Namigator.Map)**
 - Struct wrapping NIF resource reference
 - Position type: `{float, float, float}` tuples
 - No processes - apps decide their own concurrency model
 - Fine's ResourcePtr handles cleanup on GC
+- Documents thread safety requirements
 
 ## Public API
 
@@ -66,15 +121,15 @@ namigator/
 # => {:ok, [{x1, y1, z1}, ..., {x2, y2, z2}]}
 
 # Spatial queries
-true = Namigator.Map.line_of_sight?(map, start, stop, doodads: false)
-{:ok, {zone, area}} = Namigator.Map.get_zone_and_area(map, {x, y, z})
+true = Namigator.Map.line_of_sight?(map, start, stop, include_doodads: false)
+{:ok, {zone, area}} = Namigator.Map.zone_and_area(map, {x, y, z})
 {:ok, point} = Namigator.Map.find_random_point_around_circle(map, center, radius)
-{:ok, point} = Namigator.Map.find_point_between(map, start, stop, distance)
+{:ok, point} = Namigator.Map.find_point_in_between(map, start, stop, distance)
 
 # ADT management
 {:ok, count} = Namigator.Map.load_all_adts(map)
-{:ok, {adt_x, adt_y}} = Namigator.Map.load_adt_at(map, x, y)
-:ok = Namigator.Map.unload_adt(map, adt_x, adt_y)
+true = Namigator.Map.load_adt(map, x, y)
+:ok = Namigator.Map.unload_adt(map, x, y)
 {:ok, height} = Namigator.Map.find_height(map, source, x, y)
 {:ok, heights} = Namigator.Map.find_heights(map, x, y)
 ```
@@ -92,26 +147,57 @@ defmodule Namigator.NIF do
     :erlang.load_nif(path, 0)
   end
 
+  @type map_ref :: reference()
+  @type coord :: {float(), float(), float()}
+
   # Resource management
+  @spec map_new(String.t(), String.t()) :: map_ref()
   def map_new(_data_path, _map_name), do: :erlang.nif_error(:not_loaded)
 
   # ADT loading
-  def load_all_adts(_map_ref), do: :erlang.nif_error(:not_loaded)
-  def load_adt(_map_ref, _x, _y), do: :erlang.nif_error(:not_loaded)
-  def load_adt_at(_map_ref, _x, _y), do: :erlang.nif_error(:not_loaded)
-  def unload_adt(_map_ref, _x, _y), do: :erlang.nif_error(:not_loaded)
-  def adt_loaded?(_map_ref, _x, _y), do: :erlang.nif_error(:not_loaded)
+  @spec map_load_all_adts(map_ref()) :: integer()
+  def map_load_all_adts(_map_ref), do: :erlang.nif_error(:not_loaded)
+
+  @spec map_load_adt(map_ref(), integer(), integer()) :: boolean()
+  def map_load_adt(_map_ref, _x, _y), do: :erlang.nif_error(:not_loaded)
+
+  @spec map_unload_adt(map_ref(), integer(), integer()) :: :ok
+  def map_unload_adt(_map_ref, _x, _y), do: :erlang.nif_error(:not_loaded)
+
+  @spec map_has_adt(map_ref(), integer(), integer()) :: boolean()
+  def map_has_adt(_map_ref, _x, _y), do: :erlang.nif_error(:not_loaded)
+
+  @spec map_is_adt_loaded(map_ref(), integer(), integer()) :: boolean()
+  def map_is_adt_loaded(_map_ref, _x, _y), do: :erlang.nif_error(:not_loaded)
 
   # Pathfinding
-  def find_path(_map_ref, _x1, _y1, _z1, _x2, _y2, _z2), do: :erlang.nif_error(:not_loaded)
-  def find_height(_map_ref, _x1, _y1, _z1, _x2, _y2), do: :erlang.nif_error(:not_loaded)
-  def find_heights(_map_ref, _x, _y), do: :erlang.nif_error(:not_loaded)
+  @spec map_find_path(map_ref(), coord(), coord(), boolean()) ::
+          {:ok, [coord()]} | {:error, :no_path}
+  def map_find_path(_map_ref, _start, _stop, _allow_partial), do: :erlang.nif_error(:not_loaded)
+
+  @spec map_find_height(map_ref(), coord(), float(), float()) ::
+          {:ok, float()} | {:error, :not_found}
+  def map_find_height(_map_ref, _source, _x, _y), do: :erlang.nif_error(:not_loaded)
+
+  @spec map_find_heights(map_ref(), float(), float()) ::
+          {:ok, [float()]} | {:error, :not_found}
+  def map_find_heights(_map_ref, _x, _y), do: :erlang.nif_error(:not_loaded)
 
   # Spatial queries
-  def line_of_sight(_map_ref, _x1, _y1, _z1, _x2, _y2, _z2, _doodads), do: :erlang.nif_error(:not_loaded)
-  def get_zone_and_area(_map_ref, _x, _y, _z), do: :erlang.nif_error(:not_loaded)
-  def find_random_point_around_circle(_map_ref, _x, _y, _z, _radius), do: :erlang.nif_error(:not_loaded)
-  def find_point_between(_map_ref, _x1, _y1, _z1, _x2, _y2, _z2, _distance), do: :erlang.nif_error(:not_loaded)
+  @spec map_line_of_sight(map_ref(), coord(), coord(), boolean()) :: boolean()
+  def map_line_of_sight(_map_ref, _start, _stop, _include_doodads), do: :erlang.nif_error(:not_loaded)
+
+  @spec map_zone_and_area(map_ref(), coord()) ::
+          {:ok, {non_neg_integer(), non_neg_integer()}} | {:error, :not_found}
+  def map_zone_and_area(_map_ref, _position), do: :erlang.nif_error(:not_loaded)
+
+  @spec map_find_random_point_around_circle(map_ref(), coord(), float()) ::
+          {:ok, coord()} | {:error, :not_found}
+  def map_find_random_point_around_circle(_map_ref, _center, _radius), do: :erlang.nif_error(:not_loaded)
+
+  @spec map_find_point_in_between(map_ref(), coord(), coord(), float()) ::
+          {:ok, coord()} | {:error, :not_found}
+  def map_find_point_in_between(_map_ref, _start, _stop, _distance), do: :erlang.nif_error(:not_loaded)
 end
 ```
 
@@ -120,63 +206,64 @@ end
 ```cpp
 // c_src/namigator_nif.cpp
 #include <fine.hpp>
-#include "namigator/pathfind/Map.hpp"
-#include "namigator/Common.hpp"
+#include "pathfind/Map.hpp"
+
+#include <regex>
 
 // Register Map as a Fine resource (ref-counted, auto-freed)
 FINE_RESOURCE(pathfind::Map);
 
-// Create a new map resource
+// Validate map_name to prevent path traversal
+bool validate_map_name(const std::string& name) {
+    // Only allow alphanumeric, underscore, and hyphen
+    static const std::regex valid_pattern("^[a-zA-Z0-9_-]+$");
+    return std::regex_match(name, valid_pattern) &&
+           name.find("..") == std::string::npos;
+}
+
+// Create a new map resource (dirty CPU - file I/O)
 fine::ResourcePtr<pathfind::Map> map_new(
     ErlNifEnv* env,
     std::string data_path,
     std::string map_name
 ) {
-    try {
-        return fine::make_resource<pathfind::Map>(data_path, map_name);
-    } catch (const std::exception& e) {
-        fine::throw_exception(env, e.what());
+    if (!validate_map_name(map_name)) {
+        fine::throw_exception(env, "invalid map name: must be alphanumeric, underscore, or hyphen only");
     }
+    return fine::make_resource<pathfind::Map>(data_path, map_name);
 }
 
-// Pathfinding - returns list of {x, y, z} tuples
-fine::Term find_path(
+// Load all ADTs (dirty CPU - slow file I/O)
+int64_t map_load_all_adts(ErlNifEnv* env, fine::ResourcePtr<pathfind::Map> map) {
+    return map->LoadAllADTs();
+}
+
+// Find path (dirty CPU - potentially expensive computation)
+std::variant<fine::Ok<Path>, fine::Error<fine::Atom>> map_find_path(
     ErlNifEnv* env,
     fine::ResourcePtr<pathfind::Map> map,
-    float x1, float y1, float z1,
-    float x2, float y2, float z2
+    Coord start, Coord end,
+    bool allow_partial
 ) {
-    std::vector<math::Vertex> path;
-    math::Vertex start{x1, y1, z1};
-    math::Vertex end{x2, y2, z2};
-
-    if (!map->FindPath(start, end, path, false)) {
-        return fine::encode(env, fine::Atom("error"));
-    }
-
-    std::vector<std::tuple<float, float, float>> result;
-    result.reserve(path.size());
-    for (const auto& v : path) {
-        result.emplace_back(v.X, v.Y, v.Z);
-    }
-    return fine::encode(env, result);
+    // ... implementation
 }
 
-// Line of sight check
-bool line_of_sight(
-    ErlNifEnv* env,
-    fine::ResourcePtr<pathfind::Map> map,
-    float x1, float y1, float z1,
-    float x2, float y2, float z2,
-    bool doodads
-) {
-    return map->LineOfSight({x1, y1, z1}, {x2, y2, z2}, doodads);
-}
-
+// Use FINE_DIRTY_CPU for potentially slow operations
 FINE_NIF(map_new, FINE_DIRTY_CPU);
-FINE_NIF(find_path, 0);
-FINE_NIF(line_of_sight, 0);
-// ... remaining functions
+FINE_NIF(map_load_all_adts, FINE_DIRTY_CPU);
+FINE_NIF(map_load_adt, FINE_DIRTY_CPU);
+FINE_NIF(map_find_path, FINE_DIRTY_CPU);
+FINE_NIF(map_find_height, FINE_DIRTY_CPU);
+FINE_NIF(map_find_heights, FINE_DIRTY_CPU);
+FINE_NIF(map_line_of_sight, FINE_DIRTY_CPU);
+FINE_NIF(map_zone_and_area, 0);  // Fast lookup, normal scheduler OK
+FINE_NIF(map_find_random_point_around_circle, FINE_DIRTY_CPU);
+FINE_NIF(map_find_point_in_between, FINE_DIRTY_CPU);
+
+// Fast operations can use normal scheduler
+FINE_NIF(map_unload_adt, 0);
+FINE_NIF(map_has_adt, 0);
+FINE_NIF(map_is_adt_loaded, 0);
 
 FINE_INIT("Elixir.Namigator.NIF");
 ```
@@ -191,54 +278,43 @@ defmodule Namigator.Map do
 
   This is a simple struct - no process, no supervision.
   Consuming applications decide their own concurrency model.
+
+  ## Thread Safety
+
+  **WARNING:** The underlying C++ Map class is NOT thread-safe.
+
+  If multiple Elixir processes access the same `Namigator.Map` struct
+  concurrently, you MUST serialize access (e.g., via a GenServer).
+
+  Alternatively, each process can create its own map instance, at the
+  cost of increased memory usage.
+
+  ## Coordinate System
+
+  All coordinates use the World of Warcraft coordinate system:
+  - X: East-West (positive = East)
+  - Y: North-South (positive = North)
+  - Z: Vertical (positive = Up)
   """
 
-  @enforce_keys [:ref]
-  defstruct [:ref]
-
-  @type t :: %__MODULE__{ref: reference()}
-  @type position :: {float(), float(), float()}
-
-  @spec new(String.t(), String.t()) :: {:ok, t()} | {:error, term()}
-  def new(data_path, map_name) do
-    case Namigator.NIF.map_new(data_path, map_name) do
-      {:ok, ref} -> {:ok, %__MODULE__{ref: ref}}
-      {:error, _} = err -> err
-    end
-  end
-
-  @spec find_path(t(), position(), position()) :: {:ok, [position()]} | {:error, term()}
-  def find_path(%__MODULE__{ref: ref}, {x1, y1, z1}, {x2, y2, z2}) do
-    Namigator.NIF.find_path(ref, x1, y1, z1, x2, y2, z2)
-  end
-
-  @spec line_of_sight?(t(), position(), position(), keyword()) :: boolean()
-  def line_of_sight?(%__MODULE__{ref: ref}, {x1, y1, z1}, {x2, y2, z2}, opts \\ []) do
-    doodads = Keyword.get(opts, :doodads, false)
-    Namigator.NIF.line_of_sight(ref, x1, y1, z1, x2, y2, z2, doodads)
-  end
-
-  @spec load_adt_at(t(), float(), float()) :: {:ok, {integer(), integer()}} | {:error, term()}
-  def load_adt_at(%__MODULE__{ref: ref}, x, y) do
-    Namigator.NIF.load_adt_at(ref, x, y)
-  end
-
-  @spec load_all_adts(t()) :: {:ok, integer()} | {:error, term()}
-  def load_all_adts(%__MODULE__{ref: ref}) do
-    Namigator.NIF.load_all_adts(ref)
-  end
-
-  @spec get_zone_and_area(t(), position()) :: {:ok, {integer(), integer()}} | {:error, term()}
-  def get_zone_and_area(%__MODULE__{ref: ref}, {x, y, z}) do
-    Namigator.NIF.get_zone_and_area(ref, x, y, z)
-  end
-
-  @spec find_random_point_around_circle(t(), position(), float()) :: {:ok, position()} | {:error, term()}
-  def find_random_point_around_circle(%__MODULE__{ref: ref}, {x, y, z}, radius) do
-    Namigator.NIF.find_random_point_around_circle(ref, x, y, z, radius)
-  end
+  # ... implementation
 end
 ```
+
+## Error Handling
+
+All functions return consistent result types:
+
+| Function | Success | Error |
+|----------|---------|-------|
+| `new/2` | `{:ok, map}` | `{:error, reason}` |
+| `find_path/3,4` | `{:ok, path}` | `{:error, :no_path}` |
+| `find_height/4` | `{:ok, z}` | `{:error, :not_found}` |
+| `find_heights/3` | `{:ok, [z, ...]}` | `{:error, :not_found}` |
+| `zone_and_area/2` | `{:ok, {zone, area}}` | `{:error, :not_found}` |
+| `load_all_adts/1` | `{:ok, count}` | `{:error, reason}` |
+| `load_adt/3` | `true` / `false` | (no error case) |
+| `line_of_sight?/3,4` | `true` / `false` | (no error case) |
 
 ## Build System
 
@@ -248,7 +324,7 @@ defmodule Namigator.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/yourname/namigator"
+  @source_url "https://github.com/jrimmer/namigator_ex"
 
   def project do
     [
@@ -260,7 +336,10 @@ defmodule Namigator.MixProject do
       make_clean: ["clean"],
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      package: package()
+      package: package(),
+      description: "Elixir bindings for the namigator pathfinding library (World of Warcraft navigation meshes)",
+      source_url: @source_url,
+      docs: docs()
     ]
   end
 
@@ -277,9 +356,17 @@ defmodule Namigator.MixProject do
 
   defp package do
     [
-      files: ["lib", "c_src", "priv/.gitkeep", "Makefile", "mix.exs", "README.md"],
+      files: ["lib", "c_src", "priv/.gitkeep", "Makefile", "mix.exs", "README.md", "LICENSE"],
       licenses: ["MIT"],
-      links: %{"GitHub" => @source_url}
+      links: %{"GitHub" => @source_url},
+      maintainers: ["Your Name"]
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      extras: ["README.md"]
     ]
   end
 end
@@ -320,3 +407,11 @@ Namigator.Map.find_path(kalimdor, {x1, y1, z1}, {x2, y2, z2})
 ```
 
 thistle_tea can wrap `Namigator.Map` in its own GenServer if needed.
+
+## Security Considerations
+
+1. **Path Traversal**: `map_name` is validated to contain only alphanumeric characters, underscores, and hyphens. This prevents attempts to access files outside the data directory.
+
+2. **Resource Exhaustion**: No built-in limits on map/ADT loading. Consuming applications should implement their own rate limiting or resource caps if exposed to untrusted input.
+
+3. **Input Validation**: Coordinate values are not validated for NaN/Infinity - the underlying C++ code handles this gracefully by returning error results.
