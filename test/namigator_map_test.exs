@@ -75,6 +75,104 @@ defmodule Namigator.MapTest do
         Map.adt_loaded?(map, 100, 0)
       end
     end
+
+    test "unload_adt/3 raises for out-of-bounds coordinates" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        Map.unload_adt(map, -1, 64)
+      end
+    end
+
+    test "load_adt/3 accepts valid boundary coordinates (0)" do
+      # Valid coordinates pass validation but fail on invalid ref
+      # Fine raises ArgumentError with "decode failed" for invalid resource refs
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.load_adt(map, 0, 0)
+      end
+    end
+
+    test "load_adt/3 accepts valid boundary coordinates (63)" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.load_adt(map, 63, 63)
+      end
+    end
+  end
+
+  describe "error handling with invalid refs" do
+    # All functions should handle invalid map refs gracefully
+    # Fine raises ArgumentError with "decode failed" for invalid resource refs
+
+    test "find_path/4 raises on invalid ref" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.find_path(map, {0.0, 0.0, 0.0}, {1.0, 1.0, 1.0})
+      end
+    end
+
+    test "find_height/4 raises on invalid ref" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.find_height(map, {0.0, 0.0, 0.0}, 1.0, 1.0)
+      end
+    end
+
+    test "find_heights/3 raises on invalid ref" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.find_heights(map, 0.0, 0.0)
+      end
+    end
+
+    test "line_of_sight?/4 raises on invalid ref" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.line_of_sight?(map, {0.0, 0.0, 0.0}, {1.0, 1.0, 1.0})
+      end
+    end
+
+    test "zone_and_area/2 raises on invalid ref" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.zone_and_area(map, {0.0, 0.0, 0.0})
+      end
+    end
+
+    test "find_random_point_around_circle/3 raises on invalid ref" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.find_random_point_around_circle(map, {0.0, 0.0, 0.0}, 10.0)
+      end
+    end
+
+    test "find_point_in_between/4 raises on invalid ref" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.find_point_in_between(map, {0.0, 0.0, 0.0}, {1.0, 1.0, 1.0}, 0.5)
+      end
+    end
+
+    test "has_adt?/3 raises on invalid ref with valid coords" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.has_adt?(map, 32, 32)
+      end
+    end
+
+    test "adt_loaded?/3 raises on invalid ref with valid coords" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.adt_loaded?(map, 32, 32)
+      end
+    end
+
+    test "unload_adt/3 raises on invalid ref with valid coords" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.unload_adt(map, 32, 32)
+      end
+    end
   end
 
   describe "type specs" do
@@ -173,6 +271,93 @@ defmodule Namigator.MapTest do
 
     test "line_of_sight? default options" do
       assert function_exported?(Map, :line_of_sight?, 4)
+    end
+
+    test "find_path with allow_partial option" do
+      map = %Map{ref: make_ref()}
+      # Should accept the option but fail on invalid ref
+      # Fine raises ArgumentError with "decode failed" for invalid resource refs
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.find_path(map, {0.0, 0.0, 0.0}, {1.0, 1.0, 1.0}, allow_partial: true)
+      end
+    end
+
+    test "line_of_sight? with include_doodads option" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        Map.line_of_sight?(map, {0.0, 0.0, 0.0}, {1.0, 1.0, 1.0}, include_doodads: false)
+      end
+    end
+  end
+
+  describe "data path validation" do
+    test "rejects relative paths" do
+      {:error, reason} = Map.new("relative/path", "MapName")
+      assert reason =~ "invalid data path"
+    end
+
+    test "rejects paths with path traversal" do
+      {:error, reason} = Map.new("/some/../path", "MapName")
+      assert reason =~ "invalid data path"
+    end
+
+    test "rejects empty paths" do
+      {:error, reason} = Map.new("", "MapName")
+      assert reason =~ "invalid data path"
+    end
+  end
+
+  describe "map name validation" do
+    test "rejects names with forward slashes" do
+      {:error, reason} = Map.new("/valid/path", "bad/name")
+      assert reason =~ "invalid map name"
+    end
+
+    test "rejects names with backslashes" do
+      {:error, reason} = Map.new("/valid/path", "bad\\name")
+      assert reason =~ "invalid map name"
+    end
+
+    test "rejects empty names" do
+      {:error, reason} = Map.new("/valid/path", "")
+      assert reason =~ "invalid map name"
+    end
+
+    test "rejects names with special characters" do
+      {:error, reason} = Map.new("/valid/path", "map@name!")
+      assert reason =~ "invalid map name"
+    end
+
+    test "accepts valid names with underscores" do
+      # Valid name, invalid path - should fail for path reason
+      {:error, reason} = Map.new("/valid/path", "valid_name")
+      refute reason =~ "invalid map name"
+    end
+
+    test "accepts valid names with hyphens" do
+      {:error, reason} = Map.new("/valid/path", "valid-name")
+      refute reason =~ "invalid map name"
+    end
+
+    test "accepts valid alphanumeric names" do
+      {:error, reason} = Map.new("/valid/path", "Azeroth123")
+      refute reason =~ "invalid map name"
+    end
+  end
+
+  describe "normalize_error/1 behavior" do
+    # Test error normalization through Map.new
+
+    test "returns string error message for RuntimeError" do
+      {:error, reason} = Map.new("/nonexistent/path", "ValidMap")
+      assert is_binary(reason)
+      assert reason != ""
+    end
+
+    test "returns string error message for validation errors" do
+      {:error, reason} = Map.new("/some/path", "invalid map name with spaces")
+      assert is_binary(reason)
+      assert reason =~ "invalid map name"
     end
   end
 end

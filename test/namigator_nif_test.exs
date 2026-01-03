@@ -193,6 +193,55 @@ defmodule Namigator.NIFTest do
     end
   end
 
+  describe "ADT coordinate bounds edge cases" do
+    # Test boundary values (0 and 63 should be valid, pass validation but fail on NIF)
+    # Fine raises ArgumentError with "decode failed" for invalid resource refs
+
+    test "map_load_adt accepts coordinate 0 (fails on NIF, not validation)" do
+      # Coordinate 0 is valid, so validation passes but NIF fails with different error
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        NIF.map_load_adt(make_ref(), 0, 0)
+      end
+    end
+
+    test "map_load_adt accepts coordinate 63 (fails on NIF, not validation)" do
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        NIF.map_load_adt(make_ref(), 63, 63)
+      end
+    end
+
+    test "map_has_adt accepts boundary coordinates" do
+      # These pass validation but fail because make_ref() isn't a valid map
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        NIF.map_has_adt(make_ref(), 0, 63)
+      end
+    end
+
+    test "map_is_adt_loaded accepts boundary coordinates" do
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        NIF.map_is_adt_loaded(make_ref(), 63, 0)
+      end
+    end
+
+    test "map_unload_adt accepts boundary coordinates" do
+      assert_raise ArgumentError, ~r/decode failed/, fn ->
+        NIF.map_unload_adt(make_ref(), 0, 63)
+      end
+    end
+
+    test "map_load_adt rejects non-integer x coordinate" do
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        NIF.map_load_adt(make_ref(), 1.5, 32)
+      end
+    end
+
+    test "map_load_adt rejects non-integer y coordinate" do
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        NIF.map_load_adt(make_ref(), 32, 1.5)
+      end
+    end
+  end
+
   describe "NIF function stubs exist" do
     # Use __info__(:functions) which is more reliable than function_exported?
     # after NIFs have been loaded
