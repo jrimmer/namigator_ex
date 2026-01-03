@@ -1,0 +1,22 @@
+# .gitignore
+/_build/
+/cover/
+/deps/
+/doc/
+/.fetch
+erl_crash.dump
+*.ez
+*.beam
+/config/*.secret.exs
+.elixir_ls/
+
+# NIF artifacts
+/priv/*.so
+/priv/*.dll
+*.o
+*.a
+
+# C++ build artifacts
+/c_src/**/*.o
+/c_src/namigator/build/
+/c_src/recastnavigation/build/
