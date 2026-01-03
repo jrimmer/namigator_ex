@@ -15,6 +15,15 @@ Namigator provides navigation mesh (navmesh) based pathfinding for World of Warc
 - Zone and area ID lookups
 - Random point generation within a radius
 
+## Coordinate System
+
+Coordinates are represented as `{x, y, z}` tuples using WoW's coordinate system:
+- **X**: East-West axis (positive = East)
+- **Y**: North-South axis (positive = North)
+- **Z**: Vertical axis (positive = Up)
+
+All coordinate values are floats. The coordinate system matches WoW's in-game `/gps` output.
+
 ## Requirements
 
 - Elixir ~> 1.15
@@ -136,8 +145,11 @@ distance = 100.0
 
 ### ADT Management
 
+ADT (Area Data Tile) coordinates use a 64x64 grid where valid coordinates range from 0 to 63.
+For memory management guidance with large maps, see [issue #9](https://github.com/jrimmer/namigator_ex/issues/9).
+
 ```elixir
-# Check if an ADT exists at grid coordinates
+# Check if an ADT exists at grid coordinates (x and y must be 0-63)
 Namigator.Map.has_adt?(map, 32, 48)  # Returns boolean
 
 # Check if an ADT is currently loaded
@@ -150,6 +162,15 @@ Namigator.Map.load_adt(map, 32, 48)  # Returns boolean
 Namigator.Map.unload_adt(map, 32, 48)  # Returns :ok
 ```
 
+## Thread Safety
+
+**Important:** Map structs are NOT thread-safe. Each `Namigator.Map` instance should only be used from a single process at a time. The underlying C++ library does not synchronize concurrent access.
+
+Recommended patterns:
+- Use one map per GenServer process
+- Use a process pool if you need concurrent pathfinding
+- Do not share map structs between processes
+
 ## Building Navigation Data
 
 This library requires pre-built navigation mesh data. Use the namigator map builder tool to generate this data from WoW client files:
@@ -158,6 +179,10 @@ This library requires pre-built navigation mesh data. Use the namigator map buil
 2. Build the map builder tool
 3. Run it against your WoW client data directory
 4. Use the output directory as the `data_path` argument
+
+## Troubleshooting
+
+For common build issues, NIF load failures, and platform-specific notes, see [issue #16](https://github.com/jrimmer/namigator_ex/issues/16).
 
 ## License
 
