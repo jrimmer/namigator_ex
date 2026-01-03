@@ -82,8 +82,8 @@ defmodule Namigator.Map do
   def new(data_path, map_name) do
     ref = NIF.map_new(data_path, map_name)
     {:ok, %__MODULE__{ref: ref}}
-  catch
-    :error, reason -> {:error, reason}
+  rescue
+    exception -> {:error, normalize_error(exception)}
   end
 
   @doc """
@@ -98,8 +98,8 @@ defmodule Namigator.Map do
   def load_all_adts(%__MODULE__{ref: ref}) do
     count = NIF.map_load_all_adts(ref)
     {:ok, count}
-  catch
-    :error, reason -> {:error, reason}
+  rescue
+    exception -> {:error, normalize_error(exception)}
   end
 
   @doc """
@@ -258,5 +258,15 @@ defmodule Namigator.Map do
           {:ok, coord()} | {:error, :not_found}
   def find_point_in_between(%__MODULE__{ref: ref}, start, stop, distance) do
     NIF.map_find_point_in_between(ref, start, stop, distance)
+  end
+
+  defp normalize_error(exception) do
+    message = Exception.message(exception)
+
+    if is_binary(message) and message != "" do
+      message
+    else
+      "unknown error"
+    end
   end
 end

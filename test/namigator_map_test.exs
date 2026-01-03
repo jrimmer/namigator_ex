@@ -34,6 +34,47 @@ defmodule Namigator.MapTest do
       {:error, reason} = Map.new("/bad/path", "BadMap")
       assert reason != nil
     end
+
+    test "error reason is a string" do
+      {:error, reason} = Map.new("/bad/path", "BadMap")
+      assert is_binary(reason)
+    end
+
+    test "invalid map name returns a meaningful message" do
+      {:error, reason} = Map.new("/some/path", "../etc/passwd")
+      assert reason =~ "invalid map name"
+    end
+  end
+
+  describe "load_all_adts/1" do
+    test "returns error tuple on invalid map ref" do
+      map = %Map{ref: make_ref()}
+      assert {:error, reason} = Map.load_all_adts(map)
+      assert is_binary(reason)
+    end
+  end
+
+  describe "ADT bounds validation" do
+    test "load_adt/3 raises for out-of-bounds coordinates" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        Map.load_adt(map, -1, 0)
+      end
+    end
+
+    test "has_adt?/3 raises for out-of-bounds coordinates" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        Map.has_adt?(map, 0, 64)
+      end
+    end
+
+    test "adt_loaded?/3 raises for out-of-bounds coordinates" do
+      map = %Map{ref: make_ref()}
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        Map.adt_loaded?(map, 100, 0)
+      end
+    end
   end
 
   describe "type specs" do
