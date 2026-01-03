@@ -32,16 +32,30 @@ DETOUR_SRCS = \
 	c_src/recastnavigation/Detour/Source/DetourNavMeshQuery.cpp \
 	c_src/recastnavigation/Detour/Source/DetourNode.cpp
 
-ALL_SRCS = $(NIF_SRC) $(NAMIGATOR_SRCS) $(DETOUR_SRCS)
+RECAST_SRCS = \
+	c_src/recastnavigation/Recast/Source/Recast.cpp \
+	c_src/recastnavigation/Recast/Source/RecastAlloc.cpp \
+	c_src/recastnavigation/Recast/Source/RecastArea.cpp \
+	c_src/recastnavigation/Recast/Source/RecastAssert.cpp \
+	c_src/recastnavigation/Recast/Source/RecastContour.cpp \
+	c_src/recastnavigation/Recast/Source/RecastFilter.cpp \
+	c_src/recastnavigation/Recast/Source/RecastLayers.cpp \
+	c_src/recastnavigation/Recast/Source/RecastMesh.cpp \
+	c_src/recastnavigation/Recast/Source/RecastMeshDetail.cpp \
+	c_src/recastnavigation/Recast/Source/RecastRasterization.cpp \
+	c_src/recastnavigation/Recast/Source/RecastRegion.cpp
+
+ALL_SRCS = $(NIF_SRC) $(NAMIGATOR_SRCS) $(DETOUR_SRCS) $(RECAST_SRCS)
 ALL_OBJS = $(ALL_SRCS:.cpp=.o)
 
 # Compiler flags
 CXX = c++
-CXXFLAGS = -O3 -std=c++17 -fPIC -Wall
+CXXFLAGS = -O3 -std=c++17 -fPIC -Wall -DDT_POLYREF64
 CXXFLAGS += -I$(ERL_INCLUDE)
 CXXFLAGS += -Ic_src
 CXXFLAGS += -Ic_src/namigator
 CXXFLAGS += -Ic_src/recastnavigation/Detour/Include
+CXXFLAGS += -Ic_src/recastnavigation/Recast/Include
 
 # Platform-specific flags
 UNAME_S := $(shell uname -s)

@@ -2,7 +2,6 @@
 
 #include "Common.hpp"
 #include "Map.hpp"
-#include "MapBuilder/MeshBuilder.hpp"
 #include "recastnavigation/Detour/Include/DetourNavMesh.h"
 #include "recastnavigation/Recast/Include/Recast.h"
 #include "recastnavigation/Recast/Include/RecastAlloc.h"

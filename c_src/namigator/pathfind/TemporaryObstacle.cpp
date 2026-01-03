@@ -1,5 +1,4 @@
 #include "Map.hpp"
-#include "MapBuilder/MeshBuilder.hpp"
 #include "Tile.hpp"
 #include "recastnavigation/Detour/Include/DetourNavMeshBuilder.h"
 #include "recastnavigation/Recast/Include/Recast.h"
