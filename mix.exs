@@ -44,7 +44,17 @@ defmodule Namigator.MixProject do
 
   defp package do
     [
-      files: ["lib", "c_src", "priv/.gitkeep", "Makefile", "mix.exs", "README.md", "LICENSE"],
+      files: ~w(
+        lib
+        c_src/**/*.{cpp,hpp,c,h}
+        c_src/namigator/utility/PicoSHA2/LICENSE
+        priv/.gitkeep
+        Makefile
+        mix.exs
+        README.md
+        LICENSE
+        CHANGELOG.md
+      ),
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url,
