@@ -250,7 +250,7 @@ FINE_NIF(map_new, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 // ADT loading/unloading - involves file I/O, use dirty CPU scheduler
 FINE_NIF(map_load_all_adts, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 FINE_NIF(map_load_adt_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND);
-FINE_NIF(map_unload_adt_nif, 0);  // Just memory cleanup, fast
+FINE_NIF(map_unload_adt_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 
 // ADT queries - fast lookups, use normal scheduler
 FINE_NIF(map_has_adt_nif, 0);
@@ -263,7 +263,7 @@ FINE_NIF(map_find_heights, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 FINE_NIF(map_line_of_sight, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 
 // Zone/area lookup - fast hash lookup, use normal scheduler
-FINE_NIF(map_zone_and_area, 0);
+FINE_NIF(map_zone_and_area, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 
 // Spatial queries - can involve pathfinding, use dirty CPU scheduler
 FINE_NIF(map_find_random_point_around_circle, ERL_NIF_DIRTY_JOB_CPU_BOUND);
