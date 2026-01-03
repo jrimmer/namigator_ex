@@ -164,6 +164,8 @@ namespace {
                 return "mz_inflateInit failed";
             case Result::MZ_INFLATE_FAILED:
                 return "mz_inflate failed";
+            case Result::DECOMPRESS_OUTPUT_TOO_LARGE:
+                return "Decompressed output too large";
             case Result::INVALID_ROW_COLUMN_FROM_DBC:
                 return "Invalid row, column requested from DBC";
             case Result::GAMEOBJECT_WITH_SPECIFIED_GUID_ALREADY_EXISTS:

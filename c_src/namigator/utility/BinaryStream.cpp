@@ -47,8 +47,8 @@ BinaryStream::BinaryStream(const std::filesystem::path& path)
 }
 
 BinaryStream::BinaryStream(BinaryStream&& other) noexcept
-    : m_buffer(std::move(other.m_buffer)),
-      m_sharedBuffer(std::move(other.m_sharedBuffer)), m_rpos(other.m_rpos),
+    : m_sharedBuffer(std::move(other.m_sharedBuffer)),
+      m_buffer(std::move(other.m_buffer)), m_rpos(other.m_rpos),
       m_wpos(other.m_wpos)
 {
     other.m_rpos = other.m_wpos = 0;
@@ -221,6 +221,10 @@ void BinaryStream::Compress()
 
 void BinaryStream::Decompress()
 {
+    if (m_wpos == 0)
+        return;
+
+    constexpr size_t maxDecompressedSize = 512 * 1024 * 1024;
     std::vector<std::uint8_t> buffer(m_wpos);
     mz_stream stream;
     memset(&stream, 0, sizeof(stream));
@@ -246,8 +250,19 @@ void BinaryStream::Decompress()
         // more to decompress
         if (status == MZ_OK)
         {
+            if (stream.total_out > maxDecompressedSize)
+            {
+                mz_inflateEnd(&stream);
+                THROW(Result::DECOMPRESS_OUTPUT_TOO_LARGE);
+            }
+
             buffer.resize(2 * (std::max)(buffer.size(), static_cast<size_t>(
                                                             stream.total_out)));
+            if (buffer.size() > maxDecompressedSize)
+            {
+                mz_inflateEnd(&stream);
+                THROW(Result::DECOMPRESS_OUTPUT_TOO_LARGE);
+            }
             stream.next_out = &buffer[stream.total_out];
             stream.avail_out =
                 static_cast<unsigned int>(buffer.size() - stream.total_out);

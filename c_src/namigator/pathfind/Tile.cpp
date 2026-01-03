@@ -31,7 +31,7 @@ Tile::Tile(Map* map, utility::BinaryStream& in, const fs::path& navPath,
 
         for (auto const wmo : m_staticWmos)
             m_staticWmoModels.push_back(
-                std::move(map->LoadModelForWmoInstance(wmo)));
+                map->LoadModelForWmoInstance(wmo));
     }
 
     // for global WMOs, doodads are not referenced or loaded on a per-tile
@@ -47,7 +47,7 @@ Tile::Tile(Map* map, utility::BinaryStream& in, const fs::path& navPath,
 
         for (auto const doodad : m_staticDoodads)
             m_staticDoodadModels.push_back(
-                std::move(map->LoadModelForDoodadInstance(doodad)));
+                map->LoadModelForDoodadInstance(doodad));
     }
 
     std::uint8_t quadHeight;
@@ -128,8 +128,12 @@ Tile::~Tile()
     }
 
     if (!!m_heightField.spans)
+    {
         for (auto i = 0; i < m_heightField.width * m_heightField.height; ++i)
             rcFree(m_heightField.spans[i]);
+        rcFree(m_heightField.spans);
+        m_heightField.spans = nullptr;
+    }
 }
 
 void Tile::LoadHeightField()
