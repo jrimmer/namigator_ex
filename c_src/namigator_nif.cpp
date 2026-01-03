@@ -2,6 +2,9 @@
 #include <fine.hpp>
 #include "pathfind/Map.hpp"
 
+#include <algorithm>
+#include <cctype>
+
 // Type aliases for coordinate tuples
 using Coord = std::tuple<double, double, double>;
 using Path = std::vector<Coord>;
@@ -9,8 +12,48 @@ using Path = std::vector<Coord>;
 // Register the Map resource type
 FINE_RESOURCE(pathfind::Map);
 
+// Validate map_name to prevent path traversal attacks
+// Only allows alphanumeric characters, underscores, and hyphens
+static bool validate_map_name(const std::string& name) {
+    if (name.empty()) return false;
+
+    // Check for path traversal attempts
+    if (name.find("..") != std::string::npos) return false;
+    if (name.find('/') != std::string::npos) return false;
+    if (name.find('\\') != std::string::npos) return false;
+
+    // Only allow alphanumeric, underscore, and hyphen
+    return std::all_of(name.begin(), name.end(), [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-';
+    });
+}
+
+// Validate data_path to prevent path traversal attacks
+static bool validate_data_path(const std::string& path) {
+    if (path.empty()) return false;
+
+    // Must be an absolute path
+    if (path[0] != '/') return false;
+
+    // Check for path traversal attempts
+    if (path.find("..") != std::string::npos) return false;
+
+    return true;
+}
+
+// ADT grid bounds (0-63 for 64x64 grid)
+static constexpr int ADT_MIN = 0;
+static constexpr int ADT_MAX = 63;
+
 // Create a new Map resource
+// Uses dirty CPU scheduler since it involves file I/O
 fine::ResourcePtr<pathfind::Map> map_new(ErlNifEnv* env, std::string data_path, std::string map_name) {
+    if (!validate_data_path(data_path)) {
+        throw std::runtime_error("invalid data path: must be an absolute path without '..' sequences");
+    }
+    if (!validate_map_name(map_name)) {
+        throw std::runtime_error("invalid map name: must contain only alphanumeric characters, underscores, or hyphens");
+    }
     return fine::make_resource<pathfind::Map>(data_path, map_name);
 }
 
@@ -19,24 +62,35 @@ int64_t map_load_all_adts(ErlNifEnv* env, fine::ResourcePtr<pathfind::Map> map) 
     return map->LoadAllADTs();
 }
 
-// Load a specific ADT
-bool map_load_adt(ErlNifEnv* env, fine::ResourcePtr<pathfind::Map> map, int64_t x, int64_t y) {
+// Validate ADT coordinates are within bounds
+static void validate_adt_coords(int64_t x, int64_t y) {
+    if (x < ADT_MIN || x > ADT_MAX || y < ADT_MIN || y > ADT_MAX) {
+        throw std::invalid_argument("ADT coordinates must be between 0 and 63");
+    }
+}
+
+// Load a specific ADT (called from Elixir wrapper that validates coords)
+bool map_load_adt_nif(ErlNifEnv* env, fine::ResourcePtr<pathfind::Map> map, int64_t x, int64_t y) {
+    validate_adt_coords(x, y);
     return map->LoadADT(static_cast<int>(x), static_cast<int>(y));
 }
 
-// Unload a specific ADT
-fine::Atom map_unload_adt(ErlNifEnv* env, fine::ResourcePtr<pathfind::Map> map, int64_t x, int64_t y) {
+// Unload a specific ADT (called from Elixir wrapper that validates coords)
+fine::Atom map_unload_adt_nif(ErlNifEnv* env, fine::ResourcePtr<pathfind::Map> map, int64_t x, int64_t y) {
+    validate_adt_coords(x, y);
     map->UnloadADT(static_cast<int>(x), static_cast<int>(y));
     return fine::Atom("ok");
 }
 
-// Check if ADT exists
-bool map_has_adt(ErlNifEnv* env, fine::ResourcePtr<pathfind::Map> map, int64_t x, int64_t y) {
+// Check if ADT exists (called from Elixir wrapper that validates coords)
+bool map_has_adt_nif(ErlNifEnv* env, fine::ResourcePtr<pathfind::Map> map, int64_t x, int64_t y) {
+    validate_adt_coords(x, y);
     return map->HasADT(static_cast<int>(x), static_cast<int>(y));
 }
 
-// Check if ADT is loaded
-bool map_is_adt_loaded(ErlNifEnv* env, fine::ResourcePtr<pathfind::Map> map, int64_t x, int64_t y) {
+// Check if ADT is loaded (called from Elixir wrapper that validates coords)
+bool map_is_adt_loaded_nif(ErlNifEnv* env, fine::ResourcePtr<pathfind::Map> map, int64_t x, int64_t y) {
+    validate_adt_coords(x, y);
     return map->IsADTLoaded(static_cast<int>(x), static_cast<int>(y));
 }
 
@@ -187,19 +241,32 @@ int64_t test_add(ErlNifEnv* env, int64_t a, int64_t b) {
     return a + b;
 }
 
+// Test function - fast, use normal scheduler
 FINE_NIF(test_add, 0);
-FINE_NIF(map_new, 0);
-FINE_NIF(map_load_all_adts, 0);
-FINE_NIF(map_load_adt, 0);
-FINE_NIF(map_unload_adt, 0);
-FINE_NIF(map_has_adt, 0);
-FINE_NIF(map_is_adt_loaded, 0);
-FINE_NIF(map_find_path, 0);
-FINE_NIF(map_find_height, 0);
-FINE_NIF(map_find_heights, 0);
-FINE_NIF(map_line_of_sight, 0);
+
+// Map creation - involves file I/O, use dirty CPU scheduler
+FINE_NIF(map_new, ERL_NIF_DIRTY_JOB_CPU_BOUND);
+
+// ADT loading/unloading - involves file I/O, use dirty CPU scheduler
+FINE_NIF(map_load_all_adts, ERL_NIF_DIRTY_JOB_CPU_BOUND);
+FINE_NIF(map_load_adt_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND);
+FINE_NIF(map_unload_adt_nif, 0);  // Just memory cleanup, fast
+
+// ADT queries - fast lookups, use normal scheduler
+FINE_NIF(map_has_adt_nif, 0);
+FINE_NIF(map_is_adt_loaded_nif, 0);
+
+// Pathfinding - potentially expensive computation, use dirty CPU scheduler
+FINE_NIF(map_find_path, ERL_NIF_DIRTY_JOB_CPU_BOUND);
+FINE_NIF(map_find_height, ERL_NIF_DIRTY_JOB_CPU_BOUND);
+FINE_NIF(map_find_heights, ERL_NIF_DIRTY_JOB_CPU_BOUND);
+FINE_NIF(map_line_of_sight, ERL_NIF_DIRTY_JOB_CPU_BOUND);
+
+// Zone/area lookup - fast hash lookup, use normal scheduler
 FINE_NIF(map_zone_and_area, 0);
-FINE_NIF(map_find_random_point_around_circle, 0);
-FINE_NIF(map_find_point_in_between, 0);
+
+// Spatial queries - can involve pathfinding, use dirty CPU scheduler
+FINE_NIF(map_find_random_point_around_circle, ERL_NIF_DIRTY_JOB_CPU_BOUND);
+FINE_NIF(map_find_point_in_between, ERL_NIF_DIRTY_JOB_CPU_BOUND);
 
 FINE_INIT("Elixir.Namigator.NIF");

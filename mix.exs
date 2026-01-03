@@ -15,8 +15,9 @@ defmodule Namigator.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       package: package(),
-      description: "Elixir bindings for namigator pathfinding library",
-      source_url: @source_url
+      description: description(),
+      source_url: @source_url,
+      docs: docs()
     ]
   end
 
@@ -31,11 +32,33 @@ defmodule Namigator.MixProject do
     ]
   end
 
+  defp description do
+    """
+    Elixir bindings for the namigator pathfinding library.
+
+    Provides navigation mesh (navmesh) pathfinding capabilities for World of Warcraft
+    server emulators. Uses Fine for NIF bindings to the C++ namigator library with
+    Recast/Detour for navigation mesh operations.
+    """
+  end
+
   defp package do
     [
       files: ["lib", "c_src", "priv/.gitkeep", "Makefile", "mix.exs", "README.md", "LICENSE"],
       licenses: ["MIT"],
-      links: %{"GitHub" => @source_url}
+      links: %{
+        "GitHub" => @source_url,
+        "namigator" => "https://github.com/namreeb/namigator"
+      },
+      maintainers: ["jrimmer"]
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      extras: ["README.md"],
+      source_ref: "v#{@version}"
     ]
   end
 end

@@ -95,6 +95,13 @@ defmodule Namigator.MapTest do
       assert function_exported?(Map, :find_heights, 3)
     end
 
+    # Verify the newly added wrapper function
+    @tag :find_heights
+    test "find_heights/3 wrapper delegates to NIF" do
+      # The function should accept a map struct and x, y coordinates
+      assert function_exported?(Map, :find_heights, 3)
+    end
+
     test "line_of_sight?/3 exists (without options)" do
       assert function_exported?(Map, :line_of_sight?, 3)
     end

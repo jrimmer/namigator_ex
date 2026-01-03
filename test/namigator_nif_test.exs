@@ -43,6 +43,156 @@ defmodule Namigator.NIFTest do
     end
   end
 
+  describe "map_new/2 data_path validation" do
+    test "rejects empty data path" do
+      assert_raise RuntimeError, ~r/invalid data path/, fn ->
+        NIF.map_new("", "MapName")
+      end
+    end
+
+    test "rejects relative data path" do
+      assert_raise RuntimeError, ~r/invalid data path/, fn ->
+        NIF.map_new("relative/path", "MapName")
+      end
+    end
+
+    test "rejects data path with double dots" do
+      assert_raise RuntimeError, ~r/invalid data path/, fn ->
+        NIF.map_new("/some/../etc", "MapName")
+      end
+    end
+
+    test "accepts valid absolute data path" do
+      # Should fail for different reason (path doesn't exist), not validation
+      try do
+        NIF.map_new("/valid/absolute/path", "MapName")
+        flunk("Expected an error to be raised")
+      rescue
+        e in RuntimeError ->
+          refute Exception.message(e) =~ "invalid data path"
+      end
+    end
+  end
+
+  describe "map_new/2 map_name validation" do
+    test "rejects map names with double dots" do
+      assert_raise RuntimeError, ~r/invalid map name/, fn ->
+        NIF.map_new("/some/path", "../etc/passwd")
+      end
+    end
+
+    test "rejects map names with forward slashes" do
+      assert_raise RuntimeError, ~r/invalid map name/, fn ->
+        NIF.map_new("/some/path", "foo/bar")
+      end
+    end
+
+    test "rejects map names with backslashes" do
+      assert_raise RuntimeError, ~r/invalid map name/, fn ->
+        NIF.map_new("/some/path", "foo\\bar")
+      end
+    end
+
+    test "rejects empty map names" do
+      assert_raise RuntimeError, ~r/invalid map name/, fn ->
+        NIF.map_new("/some/path", "")
+      end
+    end
+
+    test "rejects map names with spaces" do
+      assert_raise RuntimeError, ~r/invalid map name/, fn ->
+        NIF.map_new("/some/path", "map with spaces")
+      end
+    end
+
+    test "rejects map names with special characters" do
+      assert_raise RuntimeError, ~r/invalid map name/, fn ->
+        NIF.map_new("/some/path", "map@name!")
+      end
+    end
+
+    test "accepts valid map names with alphanumeric characters" do
+      # This will still fail because the path doesn't exist,
+      # but it should fail for a different reason (not "invalid map name")
+      try do
+        NIF.map_new("/some/path", "Azeroth123")
+        flunk("Expected an error to be raised")
+      rescue
+        e in RuntimeError ->
+          refute Exception.message(e) =~ "invalid map name"
+      end
+    end
+
+    test "accepts valid map names with underscores" do
+      try do
+        NIF.map_new("/some/path", "Eastern_Kingdoms")
+        flunk("Expected an error to be raised")
+      rescue
+        e in RuntimeError ->
+          refute Exception.message(e) =~ "invalid map name"
+      end
+    end
+
+    test "accepts valid map names with hyphens" do
+      try do
+        NIF.map_new("/some/path", "map-name")
+        flunk("Expected an error to be raised")
+      rescue
+        e in RuntimeError ->
+          refute Exception.message(e) =~ "invalid map name"
+      end
+    end
+  end
+
+  describe "ADT coordinate bounds validation" do
+    # ADT grid is 64x64, valid range is 0-63
+    # We can't test with a real map, but we can verify the error is raised
+    # before the map operations fail for other reasons
+
+    test "map_load_adt rejects negative x coordinate" do
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        # Create a fake ref - validation happens before map access
+        NIF.map_load_adt(make_ref(), -1, 32)
+      end
+    end
+
+    test "map_load_adt rejects x coordinate above 63" do
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        NIF.map_load_adt(make_ref(), 64, 32)
+      end
+    end
+
+    test "map_load_adt rejects negative y coordinate" do
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        NIF.map_load_adt(make_ref(), 32, -1)
+      end
+    end
+
+    test "map_load_adt rejects y coordinate above 63" do
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        NIF.map_load_adt(make_ref(), 32, 64)
+      end
+    end
+
+    test "map_has_adt rejects out-of-bounds coordinates" do
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        NIF.map_has_adt(make_ref(), 100, 100)
+      end
+    end
+
+    test "map_is_adt_loaded rejects out-of-bounds coordinates" do
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        NIF.map_is_adt_loaded(make_ref(), -5, 70)
+      end
+    end
+
+    test "map_unload_adt rejects out-of-bounds coordinates" do
+      assert_raise ArgumentError, ~r/ADT coordinates must be between 0 and 63/, fn ->
+        NIF.map_unload_adt(make_ref(), 64, 0)
+      end
+    end
+  end
+
   describe "NIF function stubs exist" do
     # Use __info__(:functions) which is more reliable than function_exported?
     # after NIFs have been loaded
